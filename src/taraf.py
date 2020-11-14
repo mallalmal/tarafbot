@@ -7,7 +7,7 @@ from random import shuffle
 MIN_PLAYER = 2
 MAX_PLAYER = 6
 CHEAT_ON = True
-DEBUG_ON = True
+DEBUG_ON = False
 
 
 # Debug print
@@ -66,6 +66,7 @@ class GameContext:
         self.nbOfTurns = 0
         self.currentTurn = 0
         self.currentPlayer = 0
+        self.firstPlayer = 0
         self.firstDealer = None
         # DealerTurn based infos
         self.sumOfCalls = 0
@@ -104,7 +105,8 @@ class GameContext:
     async def __startPlayingPhase(self, ctx):
         dprint("Starting playing phase")
         self.turnState = TurnState.PLAYING
-        self.currentPlayer = 0
+        self.firstPlayer = 0
+        self.currentPlayer = self.firstPlayer
         await self.printPlayersCalls(ctx)
         self.highestCard = 0
         self.highestCardOwner = None
@@ -166,9 +168,7 @@ class GameContext:
             if len(self.players) <= MAX_PLAYER:
                 player = Player(name, bool(not self.players), ctx.message.author)
                 self.players.append(player)
-                await ctx.send(name + " a rejoins la partie. Vous êtes " + str(len(self.players)))
-                # if player.isMaster:
-                #    await ctx.send("et c'est le maître du jeux")
+                await ctx.send(name + " a rejoint la partie. Vous êtes " + str(len(self.players)))
             else:
                 await ctx.send("Il y a déjà trop de joueurs ! (" + str(len(self.players)) + ")")
 
@@ -194,6 +194,7 @@ class GameContext:
         shuffle(self.players)
         await self.printPlayersOrder(ctx)
         self.currentPlayer = 0
+        self.firstPlayer = 0
         self.firstDealer = self.players[0]
 
     async def sendCardsToPlayer(self):
@@ -202,11 +203,14 @@ class GameContext:
                 message = []
                 for otherPlayers in self.players:
                     if receiver.name != otherPlayers.name:
-                        message.append(otherPlayers.cards)
+                        message.append(otherPlayers.cards[0])
+                await receiver.user.send("Cartes sur le front des autres :")
+                message = ['J' if card == 22 else card for card in message]
                 await receiver.user.send(message)
         else:
             for player in self.players:
-                await player.user.send(player.cards)
+                message = ['J' if card == 22 else card for card in player.cards]
+                await player.user.send(message)
 
     async def startNewTurn(self, ctx):
         await ctx.send("Nouveau tour")
@@ -233,7 +237,7 @@ class GameContext:
             if self.currentTurn == 0:  # plays cards automatically on last turn since player don't know their cards
                 await self.handleLastTurn(ctx)
             else:
-                await ctx.send("Au tour de " + self.players[self.currentPlayer].name + " de jouer la première carte")
+                await ctx.send("Au tour de " + self.players[self.firstPlayer].name + " de jouer la première carte")
         else:
             await ctx.send("Au tour de " + self.players[self.currentPlayer].name + " de call")
 
@@ -273,14 +277,21 @@ class GameContext:
             await self.__rearmCurrentTurn()
             await self.startNewTurn(ctx)
 
+    async def incrementCurrentPlayer(self):
+        self.currentPlayer += 1
+        if self.currentPlayer == len(self.players):  #
+            self.currentPlayer = 0
+
     async def nextPlayer(self, ctx):
         dprint("nextPlayer, currentPlayer = " + str(self.currentPlayer) + " out of " + str(
             len(self.players) - 1) + " players")
-        self.currentPlayer += 1
-        if self.currentPlayer == len(self.players):
+        await self.incrementCurrentPlayer()
+        if self.currentPlayer == self.firstPlayer:
             await ctx.send("Pli terminé, " + self.highestCardOwner + " le prends avec " + str(self.highestCard))
             await self.incrementPlayerFoldTaken(self.highestCardOwner)
-            self.currentPlayer = 0
+            self.firstPlayer = await self.__getPlayerPosition(self.highestCardOwner)
+            self.currentPlayer = self.firstPlayer
+            self.highestCard = 0
             if self.players[self.currentPlayer].cards:
                 await ctx.send(
                     "Nouveau pli, au tour de " + self.players[self.currentPlayer].name + " de jouer la première carte")
@@ -304,7 +315,7 @@ class GameContext:
     async def handleCardPlayed(self, ctx, playerName, card):
         if self.turnState == TurnState.PLAYING and await self.isThisPlayerTurnToPlay(playerName):
             if await self.doesHeHaveThatCard(playerName, card):
-                dprint(playerName + " plays " + str(card))
+                print(playerName + " plays " + str(card))
                 await self.removeCardFromPlayer(playerName, card)
                 await self.checkIfCardIsHigher(ctx, card, playerName)
                 await self.nextPlayer(ctx)

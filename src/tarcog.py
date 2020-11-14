@@ -44,42 +44,46 @@ class TarCog(commands.Cog):
 
     @commands.command()
     async def go(self, ctx):
-        dprint("!go")
-        if self.state == GameState.SIGNIN:
-            if len(self.theGame.players) >= MIN_PLAYER:
-                self.state = GameState.STARTED
-                await self.theGame.prepareGame(ctx)
-                await self.theGame.startNewTurn(ctx)
+        if self.channel == ctx.message.channel.name:
+            dprint("!go")
+            if self.state == GameState.SIGNIN:
+                if len(self.theGame.players) >= MIN_PLAYER:
+                    self.state = GameState.STARTED
+                    await self.theGame.prepareGame(ctx)
+                    await self.theGame.startNewTurn(ctx)
+                else:
+                    await ctx.send("Pas assez de joueurs")
             else:
-                await ctx.send("Pas assez de joueurs")
-        else:
-            await ctx.send("Il faut d'abord ouvrir les inscriptions")
+                await ctx.send("Il faut d'abord ouvrir les inscriptions")
 
     @commands.command()
     async def call(self, ctx, call):
-        dprint("!call " + str(call))
-        if self.state == GameState.STARTED:
-            await self.theGame.handlePlayerCall(ctx, call)
+        if self.channel == ctx.message.channel.name:
+            dprint("!call " + str(call))
+            if self.state == GameState.STARTED:
+                await self.theGame.handlePlayerCall(ctx, call)
 
     @commands.command()
     async def play(self, ctx, card):
-        dprint("!play " + str(card))
-        if self.state == GameState.STARTED:
-            if card == "J+":
-                card = 22
-            elif card == "J-":
-                card = 0
-            await self.theGame.handleCardPlayed(ctx, ctx.message.author.name, card)
+        if self.channel == ctx.message.channel.name:
+            dprint("!play " + str(card))
+            if self.state == GameState.STARTED:
+                if card == "J+":
+                    card = 22
+                elif card == "J-":
+                    card = 0
+                await self.theGame.handleCardPlayed(ctx, ctx.message.author.name, card)
 
     @commands.command()
     async def helpp(self, ctx):
-        await ctx.send("Liste des commandes :\n"
-                       "   !start     : créer la partie\n"
-                       "   !join      : rejoindre la partie\n"
-                       "   !go        : lancer la partie\n"
-                       "   !call X    : call que vous aller prendre x plis\n"
-                       "   !play X    : jouer la carte X (pour le joker J+ ou J-)\n"
-                       "   !stop      : arrêter la partie")
+        if self.channel == ctx.message.channel.name:
+            await ctx.send("Liste des commandes :\n"
+                           "   !start     : créer la partie\n"
+                           "   !join      : rejoindre la partie\n"
+                           "   !go        : lancer la partie\n"
+                           "   !call X    : call que vous aller prendre x plis\n"
+                           "   !play X    : jouer la carte X (pour le joker J+ ou J-)\n"
+                           "   !stop      : arrêter la partie")
 
     # for debug
     @commands.command()
