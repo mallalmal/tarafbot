@@ -1,12 +1,12 @@
-
 from enum import Enum
 from discord.ext import commands
-from taraf import GameContext, dprint, MIN_PLAYER
+from taraf import GameContext, dprint, MIN_PLAYER, sendSimpleMessage
 
 class GameState(Enum):
     NOT_STARTED = 1
     SIGNIN = 2
     STARTED = 3
+
 
 class TarCog(commands.Cog):
     def __init__(self, bot):
@@ -21,17 +21,18 @@ class TarCog(commands.Cog):
         if self.state == GameState.NOT_STARTED:
             self.state = GameState.SIGNIN
             self.channel = ctx.message.channel.name
-            await ctx.send("!join pour rejoindre")
+            await sendSimpleMessage(ctx, "!join pour rejoindre")
         else:
-            await ctx.send("Partie déjà en cours")
+            await sendSimpleMessage(ctx, "Partie déjà en cours", color='red')
 
     @commands.command()
     async def stop(self, ctx):
-        # TODO should check if is master
         if self.channel == ctx.message.channel.name:
-            dprint("!stop")
-            self.theGame = GameContext()
-            self.state = GameState.NOT_STARTED
+            if await self.theGame.isThisPlayerMaster(ctx.message.author.name):
+                dprint("!stop")
+                self.theGame = GameContext()
+                self.state = GameState.NOT_STARTED
+                await sendSimpleMessage(ctx, "La partie a été reset")
 
     @commands.command()
     async def join(self, ctx):
@@ -40,7 +41,7 @@ class TarCog(commands.Cog):
             if self.state == GameState.SIGNIN:
                 await self.theGame.addPlayer(ctx)
             else:
-                await ctx.send("Pas possible de rejoindre")
+                await sendSimpleMessage(ctx, "Pas possible de rejoindre", color='red')
 
     @commands.command()
     async def go(self, ctx):
@@ -52,9 +53,11 @@ class TarCog(commands.Cog):
                     await self.theGame.prepareGame(ctx)
                     await self.theGame.startNewTurn(ctx)
                 else:
-                    await ctx.send("Pas assez de joueurs")
+                    await sendSimpleMessage(ctx, "Pas assez de joueurs",
+                                            color='red',
+                                            description="minimum : " + str(MIN_PLAYER))
             else:
-                await ctx.send("Il faut d'abord ouvrir les inscriptions")
+                await sendSimpleMessage(ctx, "Il faut d'abord ouvrir les inscriptions")
 
     @commands.command()
     async def call(self, ctx, call):

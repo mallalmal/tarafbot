@@ -2,12 +2,13 @@
 
 from enum import Enum
 from random import shuffle
+import discord
 
 # MIN and MAX values are inclusive (>=, <=)
 MIN_PLAYER = 2
 MAX_PLAYER = 6
 CHEAT_ON = True
-DEBUG_ON = False
+DEBUG_ON = True
 
 
 # Debug print
@@ -15,11 +16,32 @@ def dprint(string):
     if DEBUG_ON:
         print(string)
 
+
 # Cheat print
 def cprint(string):
     if CHEAT_ON:
         print(string)
 
+async def initNormalEmbed(message, description):
+    return discord.Embed(title=message, color=discord.Colour.blue(), description=description)
+async def initErrorEmbed(message, description):
+    return discord.Embed(title=message, color=discord.Colour.red(), description=description)
+
+async def initEmbedHeader(header, color='blue', description=None):
+    switcher = {
+        'blue': await initNormalEmbed(header, description),
+        'red': await initErrorEmbed(header, description)
+    }
+    embedHeader = switcher.get(color, await initNormalEmbed(header, description))
+    return embedHeader
+
+async def sendSimpleMessage(ctx, message, color='blue', description=None):
+    embedMsg = await initEmbedHeader(message, color, description)
+    await ctx.send(embed=embedMsg)
+
+async def sendMsgToPlayer(message, user, color='blue', description=None):
+    embedMsg = await initEmbedHeader(message, color, description)
+    await user.send(embed=embedMsg)
 
 class TurnState(Enum):
     WAITING = 1
@@ -31,12 +53,13 @@ class TurnState(Enum):
 class Player:
     def __init__(self, name, isMaster, user):
         self.name = name
-        self.isMaster = isMaster
+        self.isMaster = bool(isMaster)
         self.cards = []
         self.call = 0
         self.foldTaken = 0
         self.shitPoints = 0
         self.user = user
+        self.cardPlayed = "NA"
 
 
 async def getActualCard(card):
@@ -89,25 +112,26 @@ class GameContext:
             position += 1
         return 99
 
-    async def __startCallingPhase(self, ctx):
+    async def __startCallingPhase(self):
         dprint("Starting calling phase")
         self.turnState = TurnState.CALLING
         self.sumOfCalls = 0
+        self.firstPlayer = 0
+        self.currentPlayer = self.firstPlayer
         if self.currentTurn == 0:
             self.maxNbOfCalls = 1
         else:
             self.maxNbOfCalls = self.currentTurn
-        await ctx.send("Nombre max de call : " + str(self.maxNbOfCalls))
         # Reseting fold taken
         for player in self.players:
             player.foldTaken = 0
+            player.call = "NA"
 
-    async def __startPlayingPhase(self, ctx):
+    async def __startPlayingPhase(self):
         dprint("Starting playing phase")
         self.turnState = TurnState.PLAYING
         self.firstPlayer = 0
         self.currentPlayer = self.firstPlayer
-        await self.printPlayersCalls(ctx)
         self.highestCard = 0
         self.highestCardOwner = None
 
@@ -128,19 +152,27 @@ class GameContext:
     async def isThisPlayerTurnToPlay(self, name):
         return await self.__getPlayerPosition(name) == self.currentPlayer
 
-    async def printPlayersOrder(self, ctx):
-        await ctx.send("Ordre des joueurs :")
+    async def isThisPlayerMaster(self, name):
+        player = await self.__getPlayerByName(name)
+        if player:
+            return player.isMaster
+        else:
+            return False
+
+    async def getPlayerList(self):
+        playerList = []
         for player in self.players:
-            await ctx.send(player.name)
+            playerList.append(player.name)
+        return playerList
+
+    async def printPlayersOrder(self, ctx):
+        playerList = await self.getPlayerList()
+        await sendSimpleMessage(ctx, "Ordre des joueurs", description=', '.join(playerList))
 
     async def printPlayersInfo(self, ctx):
         for player in self.players:
-            await ctx.send(player.name + ", call: " + str(player.call) + ", foldTaken: " + str(
+            await sendSimpleMessage(ctx, player.name + ", call: " + str(player.call) + ", pli(s): " + str(
                 player.foldTaken) + ", shitPoints(s): " + str(player.shitPoints))
-
-    async def printPlayersCalls(self, ctx):
-        for player in self.players:
-            await ctx.send(player.name + " a call: " + str(player.call))
 
     async def printPlayersCards(self):
         for player in self.players:
@@ -150,7 +182,7 @@ class GameContext:
     async def isThisANewPlayer(self, playerName, ctx):
         for player in self.players:
             if playerName == player.name:
-                await ctx.send("T'es déjà inscrit " + playerName)
+                await sendSimpleMessage(ctx, "T'es déjà inscrit " + playerName, color='red')
                 return False
         return True
 
@@ -161,6 +193,7 @@ class GameContext:
     async def removeCardFromPlayer(self, playerName, card):
         player = await self.__getPlayerByName(playerName)
         player.cards.remove(int(await getActualCard(card)))
+        player.cardPlayed = str(card)
 
     async def addPlayer(self, ctx):
         name = ctx.message.author.name
@@ -168,9 +201,12 @@ class GameContext:
             if len(self.players) <= MAX_PLAYER:
                 player = Player(name, bool(not self.players), ctx.message.author)
                 self.players.append(player)
-                await ctx.send(name + " a rejoint la partie. Vous êtes " + str(len(self.players)))
+                await sendSimpleMessage(ctx, name + " a rejoint la partie. Vous êtes " + str(len(self.players)),
+                                        description=', '.join(await self.getPlayerList()))
             else:
-                await ctx.send("Il y a déjà trop de joueurs ! (" + str(len(self.players)) + ")")
+                await sendSimpleMessage(ctx, "Il y a déjà trop de joueurs !",
+                                        color='red',
+                                        description="maximum : " + str(len(self.players)))
 
     async def shuffleDeck(self, nbOfCards):
         await self.deck.shuffle(nbOfCards)
@@ -203,76 +239,117 @@ class GameContext:
                 message = []
                 for otherPlayers in self.players:
                     if receiver.name != otherPlayers.name:
-                        message.append(otherPlayers.cards[0])
-                await receiver.user.send("Cartes sur le front des autres :")
-                message = ['J' if card == 22 else card for card in message]
-                await receiver.user.send(message)
+                        message.append(otherPlayers.name)
+                        message.append(str(otherPlayers.cards[0]))
+                await sendMsgToPlayer("Cartes sur le front des autres :", receiver.user, description=', '.join(message))
         else:
-            for player in self.players:
-                message = ['J' if card == 22 else card for card in player.cards]
-                await player.user.send(message)
+            for receiver in self.players:
+                message = ['J' if card == 22 else str(card) for card in receiver.cards]
+                await sendMsgToPlayer("Vos cartes :", receiver.user, description=', '.join(message))
+
+    async def getNbOfCallsString(self):
+        return "Nombre de call : " + str(self.sumOfCalls) + "/" + str(self.maxNbOfCalls)
+
+    async def addNextCallerField(self, embedMsg):
+        embedMsg.add_field(name="Prochain caller (!call x) :", value=self.players[self.currentPlayer].name, inline=False)
+
+    async def addNextPlayerField(self, embedMsg):
+        embedMsg.add_field(name="Prochain joueur (!play x) :", value=self.players[self.currentPlayer].name, inline=False)
+
+    async def sendNewTurnMsg(self, ctx):
+        embedMsg = await initEmbedHeader("Nouveau tour :",
+                                         description=await self.getNbOfCallsString())
+        await self.addNextCallerField(embedMsg)
+        await ctx.send(embed=embedMsg)
 
     async def startNewTurn(self, ctx):
-        await ctx.send("Nouveau tour")
         await self.dealCards()
         await self.sendCardsToPlayer()
-        await self.__startCallingPhase(ctx)
-        await ctx.send("Au tour de " + self.players[self.currentPlayer].name + " de call")
+        await self.__startCallingPhase()
+        await self.sendNewTurnMsg(ctx)
 
     async def handleLastTurn(self, ctx):
-        await ctx.send("Dernier tour !")
+        await sendSimpleMessage(ctx, "Dernier tour, allez on pose les cartes")
         for player in range(len(self.players)):
-            dprint("automatically playing for " + str(self.players[self.currentPlayer].name))
             await self.handleCardPlayed(ctx,
                                         self.players[self.currentPlayer].name,
                                         self.players[self.currentPlayer].cards[0])
 
+    async def initCallingSummary(self):
+        embedMsg = await initEmbedHeader("Résumé des calls :", description=await self.getNbOfCallsString())
+        for caller in self.players:
+            embedMsg.add_field(name=caller.name, value=str(caller.call))
+        return embedMsg
+
+    async def sendCallingPhaseMsg(self, ctx):
+        embedMsg = await self.initCallingSummary()
+        await self.addNextCallerField(embedMsg)
+        await ctx.send(embed=embedMsg)
+
+    async def sendStartPlayingPhaseMsg(self, ctx):
+        embedMsg = await self.initCallingSummary()
+        await self.addNextPlayerField(embedMsg)
+        await ctx.send(embed=embedMsg)
+
     async def nextPlayerCall(self, ctx):
-        dprint("nextPlayerCall, currentPlayer = " + str(self.currentPlayer) + " out of " + str(
-            len(self.players) - 1) + " players")
         self.currentPlayer += 1
         if self.currentPlayer == len(self.players):
-            await ctx.send("\nTous les joueurs ont parlés !")
-            await self.__startPlayingPhase(ctx)
+            await self.__startPlayingPhase()
             if self.currentTurn == 0:  # plays cards automatically on last turn since player don't know their cards
                 await self.handleLastTurn(ctx)
             else:
-                await ctx.send("Au tour de " + self.players[self.firstPlayer].name + " de jouer la première carte")
+                await self.sendStartPlayingPhaseMsg(ctx)
         else:
-            await ctx.send("Au tour de " + self.players[self.currentPlayer].name + " de call")
+            await self.sendCallingPhaseMsg(ctx)
 
     async def handlePlayerCall(self, ctx, call):
         if self.turnState == TurnState.CALLING and await self.isThisPlayerTurnToPlay(ctx.message.author.name):
             if self.currentPlayer == len(self.players) - 1 and self.sumOfCalls + int(call) == self.maxNbOfCalls:
-                await ctx.send("Hé non ! Tu peux pas call " + str(call) + ", la somme des call est de " + str(
-                    self.sumOfCalls) + " sur " + str(self.maxNbOfCalls))
+                await sendSimpleMessage(ctx, "Hé non ! Tu peux pas call " + str(call),
+                                        color='red',
+                                        description=await self.getNbOfCallsString())
             else:
                 await self.setPlayerCall(ctx.message.author.name, call)
                 self.sumOfCalls += int(call)
-                await ctx.send(
-                    ctx.message.author.name + " call " + str(call) + ", total des call : " + str(self.sumOfCalls))
+                await sendSimpleMessage(ctx, ctx.message.author.name + " call : " + str(call))
                 await self.nextPlayerCall(ctx)
 
+    async def addShitPointsField(self, embedMsg):
+        for player in self.players:
+            embedMsg.add_field(name=player.name,
+                               value="+" + str(abs(player.call - player.foldTaken)) + " (" + str(player.shitPoints) + ")")
+
+    async def addFinalShitPointsField(self, embedMsg):
+        for player in self.players:
+            embedMsg.add_field(name=player.name,
+                               value=str(player.shitPoints))
+
+    async def sendShitPointsMsg(self, ctx):
+        embedMsg = await initEmbedHeader("Distrubution des shit points :")
+        await self.addShitPointsField(embedMsg)
+        await ctx.send(embed=embedMsg)
+
     async def computeShitPoints(self, ctx):
-        await ctx.send("Distribution des shitpoints :")
         for player in self.players:
             if player.call != player.foldTaken:
                 player.shitPoints += abs(player.call - player.foldTaken)
-                await ctx.send("+" + str(abs(
-                    player.call - player.foldTaken)) + " shitPoint(s) pour " + player.name + "... cheh !! T'en as " + str(
-                    player.shitPoints))
+        await self.sendShitPointsMsg(ctx)
+
+    async def sendEndOfGameMsg(self, ctx):
+        embedMsg = await initEmbedHeader("PARTIE FINIE !", description="scores final :", color='red')
+        await self.addFinalShitPointsField(embedMsg)
+        await ctx.send(embed=embedMsg)
 
     async def nextDealer(self, ctx):
         if self.players[1] == self.firstDealer:
-            await ctx.send("Partie finie !")
-            await self.printPlayersInfo(ctx)
+            await self.sendEndOfGameMsg(ctx)
             self.turnState = TurnState.PLAYING_OVER
         else:
             currentDealer = self.players[0]  # Current dealer is self.players[0]
             for player in range(len(self.players) - 1):
                 self.players[player] = self.players[player + 1]
             self.players[len(self.players) - 1] = currentDealer
-            await ctx.send("Le nouveau dealer est " + self.players[0].name)
+            await sendSimpleMessage(ctx, "Le nouveau dealer est " + self.players[0].name)
             await self.printPlayersOrder(ctx)
             await self.__rearmCurrentTurn()
             await self.startNewTurn(ctx)
@@ -282,42 +359,66 @@ class GameContext:
         if self.currentPlayer == len(self.players):  #
             self.currentPlayer = 0
 
+    async def initPlayingSummary(self):
+        embedMsg = await initEmbedHeader("Cartes jouées :",
+                                         description="C'est " + self.highestCardOwner + " qui a la main avec " + str(self.highestCard))
+        for player in self.players:
+            embedMsg.add_field(name=player.name, value=str(player.cardPlayed))
+        return embedMsg
+
+    async def sendPlayingPhaseMsg(self, ctx, printNextPlayer=True):
+        embedMsg = await self.initPlayingSummary()
+        if printNextPlayer:
+            await self.addNextPlayerField(embedMsg)
+        await ctx.send(embed=embedMsg)
+
+    async def initFoldSummary(self):
+        embedMsg = await initEmbedHeader("Résumé des plis :")
+        for player in self.players:
+            embedMsg.add_field(name=player.name, value=str(player.foldTaken) + "/" + str(player.call))
+        return embedMsg
+
+    async def sendEndOfFoldMsg(self, ctx):
+        embedMsg = await self.initFoldSummary()
+        await self.addNextPlayerField(embedMsg)
+        await ctx.send(embed=embedMsg)
+
     async def nextPlayer(self, ctx):
-        dprint("nextPlayer, currentPlayer = " + str(self.currentPlayer) + " out of " + str(
-            len(self.players) - 1) + " players")
         await self.incrementCurrentPlayer()
-        if self.currentPlayer == self.firstPlayer:
-            await ctx.send("Pli terminé, " + self.highestCardOwner + " le prends avec " + str(self.highestCard))
+        if self.currentPlayer == self.firstPlayer:  # Fold is over
+            await self.sendPlayingPhaseMsg(ctx, printNextPlayer=False)
             await self.incrementPlayerFoldTaken(self.highestCardOwner)
-            self.firstPlayer = await self.__getPlayerPosition(self.highestCardOwner)
-            self.currentPlayer = self.firstPlayer
             self.highestCard = 0
-            if self.players[self.currentPlayer].cards:
-                await ctx.send(
-                    "Nouveau pli, au tour de " + self.players[self.currentPlayer].name + " de jouer la première carte")
+            if self.players[self.currentPlayer].cards:  # New fold
+                await self.sendCardsToPlayer()
+                self.firstPlayer = await self.__getPlayerPosition(self.highestCardOwner)
+                self.currentPlayer = self.firstPlayer
+                await self.sendEndOfFoldMsg(ctx)
             else:  # Turn is over
                 await self.computeShitPoints(ctx)
                 self.currentTurn -= 1
                 if self.currentTurn >= 0:
                     await self.startNewTurn(ctx)
                 else:
-                    dprint("\nNouveau dealer :")
+                    dprint("Nouveau dealer :")
                     await self.nextDealer(ctx)
+            for player in self.players:
+                player.cardPlayed = "NA"
         else:  # There are still player playing this fold
-            await ctx.send("Au tour de " + self.players[self.currentPlayer].name + " de jouer")
+            if self.currentTurn != 0:
+                await self.sendPlayingPhaseMsg(ctx)
 
-    async def checkIfCardIsHigher(self, ctx, card, playerName):
+    async def checkIfCardIsHigher(self, card, playerName):
         if int(card) > self.highestCard:
-            await ctx.send(playerName + " prends la main avec " + str(card))
             self.highestCard = int(card)
             self.highestCardOwner = playerName
 
     async def handleCardPlayed(self, ctx, playerName, card):
         if self.turnState == TurnState.PLAYING and await self.isThisPlayerTurnToPlay(playerName):
             if await self.doesHeHaveThatCard(playerName, card):
-                print(playerName + " plays " + str(card))
                 await self.removeCardFromPlayer(playerName, card)
-                await self.checkIfCardIsHigher(ctx, card, playerName)
+                await self.checkIfCardIsHigher(card, playerName)
+                await sendSimpleMessage(ctx, playerName + " joue : " + str(card))
                 await self.nextPlayer(ctx)
             else:
-                await ctx.send("Tu n'as pas cette carte ...")
+                await sendSimpleMessage(ctx, "Tu n'as pas cette carte ...", color='red')
