@@ -2,6 +2,7 @@ from enum import Enum
 from discord.ext import commands
 from taraf import GameContext, dprint, MIN_PLAYER, sendSimpleMessage
 
+
 class GameState(Enum):
     NOT_STARTED = 1
     SIGNIN = 2
@@ -33,6 +34,7 @@ class TarCog(commands.Cog):
                 self.theGame = GameContext()
                 self.state = GameState.NOT_STARTED
                 await sendSimpleMessage(ctx, "La partie a été reset")
+        await ctx.message.delete()
 
     @commands.command()
     async def join(self, ctx):
@@ -65,6 +67,7 @@ class TarCog(commands.Cog):
             dprint("!call " + str(call))
             if self.state == GameState.STARTED:
                 await self.theGame.handlePlayerCall(ctx, call)
+        await ctx.message.delete()
 
     @commands.command()
     async def play(self, ctx, card):
@@ -76,26 +79,12 @@ class TarCog(commands.Cog):
                 elif card == "J-":
                     card = 0
                 await self.theGame.handleCardPlayed(ctx, ctx.message.author.name, card)
-
-    @commands.command()
-    async def helpp(self, ctx):
-        if self.channel == ctx.message.channel.name:
-            await ctx.send("Liste des commandes :\n"
-                           "   !start     : créer la partie\n"
-                           "   !join      : rejoindre la partie\n"
-                           "   !go        : lancer la partie\n"
-                           "   !call X    : call que vous aller prendre x plis\n"
-                           "   !play X    : jouer la carte X (pour le joker J+ ou J-)\n"
-                           "   !stop      : arrêter la partie")
+        await ctx.message.delete()
 
     # for debug
     @commands.command()
     async def show(self, ctx):
         await self.theGame.printPlayersInfo(ctx)
-
-    @commands.command()
-    async def order(self, ctx):
-        await self.theGame.printPlayersOrder(ctx)
 
     @commands.command()
     async def cheat(self, ctx):
