@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 
 from enum import Enum
-from random import shuffle
+from player import Player
+from deck import Deck, getActualCard
 import discord
 
 # MIN and MAX values are inclusive (>=, <=)
@@ -51,36 +52,6 @@ class TurnState(Enum):
     CALLING = 2
     PLAYING = 3
     PLAYING_OVER = 4
-
-
-class Player:
-    def __init__(self, name, isMaster, user):
-        self.name = name
-        self.isMaster = bool(isMaster)
-        self.cards = []
-        self.call = 0
-        self.foldTaken = 0
-        self.shitPoints = 0
-        self.user = user
-        self.cardPlayed = "NA"
-
-
-async def getActualCard(card):
-    if card == 0:
-        return 22
-    else:
-        return card
-
-
-class Deck:
-    def __init__(self):
-        self.cards = []
-
-    async def shuffle(self, nbOfCards):
-        self.cards = []
-        for card in range(nbOfCards):
-            self.cards.append(card + 1)
-        shuffle(self.cards)
 
 
 class GameContext:
@@ -237,7 +208,7 @@ class GameContext:
     async def prepareGame(self, ctx):
         self.nbOfTurns = 22 // len(self.players)
         await self.__rearmCurrentTurn()
-        shuffle(self.players)
+        await self.deck.shuffle(self.players)
         await self.printPlayersOrder(ctx)
         self.currentPlayer = 0
         self.firstPlayer = 0
@@ -270,9 +241,7 @@ class GameContext:
         embedMsg.add_field(name="Premier joueur du tour (!play x) :", value=self.players[self.currentPlayer].name, inline=False)
 
     async def sendNewTurnMsg(self, ctx):
-        embedMsg = await initEmbedHeader("Nouveau tour :",
-                                         color='teal',
-                                         description=await self.getNbOfCallsString())
+        embedMsg = await initEmbedHeader("Nouveau tour :", color='teal', description=await self.getNbOfCallsString())
         await self.addNextCallerField(embedMsg)
         await ctx.send(embed=embedMsg)
 
@@ -320,9 +289,7 @@ class GameContext:
     async def handlePlayerCall(self, ctx, call):
         if self.turnState == TurnState.CALLING and await self.isThisPlayerTurnToPlay(ctx.message.author.name):
             if self.currentPlayer == len(self.players) - 1 and self.sumOfCalls + int(call) == self.maxNbOfCalls:
-                await sendSimpleMessage(ctx, "Hé non ! Tu peux pas call " + str(call),
-                                        color='red',
-                                        description=await self.getNbOfCallsString())
+                await sendSimpleMessage(ctx, "Hé non ! Tu peux pas call " + str(call), color='red', description=await self.getNbOfCallsString())
             else:
                 await self.setPlayerCall(ctx.message.author.name, call)
                 self.sumOfCalls += int(call)
