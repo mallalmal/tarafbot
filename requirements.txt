@@ -1,2 +1,0 @@
-discord.py==1.5.1
-python-dotenv==0.15.0
