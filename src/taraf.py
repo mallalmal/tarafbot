@@ -8,7 +8,7 @@ import discord
 MIN_PLAYER = 2
 MAX_PLAYER = 6
 CHEAT_ON = True
-DEBUG_ON = True
+DEBUG_ON = False
 
 
 # Debug print
@@ -150,6 +150,7 @@ class GameContext:
     async def __deleteLastMsg(self):
         if self.lastMessage:
             await self.lastMessage.delete()
+            self.lastMessage = None
 
     async def setPlayerCall(self, playerName, call):
         player = await self.__getPlayerByName(playerName)
